@@ -96,7 +96,7 @@
 <body>
 <header style="position:relative">
  <h1>🇩🇪 Deutsch Trainer — Themen</h1>
- <div class="sub">Apprendre l'allemand par thèmes du quotidien — 100% local</div>
+ <div class="sub">Apprendre l'allemand par thèmes du quotidien — sauvegarde locale et GitHub privé</div>
  <button id="themeBtn" onclick="toggleTheme()" style="position:absolute;right:10px;top:12px;background:var(--card);border:none;border-radius:10px;padding:8px 10px;cursor:pointer;font-size:1rem">🌙</button>
 </header>
 <div id="storageBar"></div>
@@ -1334,5 +1334,57 @@ function importData(inp){
 /* ================= INIT ================= */
 boot();
 </script>
+
+<details style="max-width:736px;margin:12px auto;padding:12px;background:var(--card);border-radius:12px">
+<summary style="cursor:pointer;color:var(--accent);font-weight:700">☁️ Sauvegarde GitHub privée</summary>
+<p class="hint">Sauvegarde manuelle des thèmes, cas, notes, marquages et réglages dans data.json. Les fichiers audio restent sur cet appareil.</p>
+<p class="hint">Crée un dépôt privé pour tes données, puis un jeton GitHub à accès fin limité à ce dépôt avec « Contents: Read and write ». Le jeton est effacé après chaque opération et n’est jamais mémorisé.</p>
+<label for="ghRepo">Dépôt privé (propriétaire/nom)</label><input id="ghRepo" type="text" value="medking2011/deutsch-trainer-data" autocomplete="off">
+<label for="ghToken">Jeton GitHub</label><input id="ghToken" type="password" autocomplete="off" spellcheck="false" style="width:100%;padding:10px;border-radius:10px;background:var(--card2);color:var(--txt);border:1px solid var(--muted)">
+<button id="ghSave" class="bigbtn primary" type="button">☁️ Sauvegarder les cas sur GitHub</button>
+<button id="ghLoad" class="bigbtn ghost" type="button">📥 Télécharger ma sauvegarde GitHub</button>
+<p class="hint">Pour restaurer : télécharge la sauvegarde, puis utilise « Importer JSON ». Exporte d’abord tes données actuelles si tu souhaites les conserver.</p>
+<p id="ghStatus" class="hint" role="status" aria-live="polite"></p>
+</details>
+<script>
+(()=>{
+ const repoInput=document.getElementById('ghRepo'), tokenInput=document.getElementById('ghToken');
+ const status=document.getElementById('ghStatus'), buttons=[document.getElementById('ghSave'),document.getElementById('ghLoad')];
+ const encode=s=>{let b='';for(const n of new TextEncoder().encode(s))b+=String.fromCharCode(n);return btoa(b);};
+ const decode=s=>new TextDecoder('utf-8',{fatal:true}).decode(Uint8Array.from(atob(s.replace(/\s/g,'')),c=>c.charCodeAt(0)));
+ function validate(d){if(!d||!Array.isArray(d.themes)||d.v!==3||!d.themes.every(t=>t&&typeof t.id==='string'&&typeof t.name==='string'&&Array.isArray(t.subjects)&&t.subjects.every(s=>s&&typeof s.id==='string'&&typeof s.titel==='string'&&typeof s.content==='string')))throw Error('Format de sauvegarde incompatible. Aucun fichier modifié.');}
+ function download(text){const url=URL.createObjectURL(new Blob([text],{type:'application/json'}));const a=document.createElement('a');a.href=url;a.download='deutsch_trainer_github_'+new Date().toISOString().slice(0,10)+'.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}
+ async function run(mode){
+  const repo=repoInput.value.trim();let token=tokenInput.value.trim();tokenInput.value='';
+  if(!/^[A-Za-z0-9-]+\/[A-Za-z0-9_.-]+$/.test(repo)||!token){status.textContent='Renseigne le dépôt privé et le jeton GitHub.';return;}
+  buttons.forEach(b=>b.disabled=true);status.textContent='Connexion à GitHub…';
+  const base='https://api.github.com/repos/'+repo.split('/').map(encodeURIComponent).join('/');
+  async function request(url,options={}){const r=await fetch(url,{...options,cache:'no-store',redirect:'error',headers:{Accept:'application/vnd.github+json',Authorization:'Bearer '+token,...(options.body?{'Content-Type':'application/json'}:{})},signal:AbortSignal.timeout(30000)});if(r.status===404)return null;if(!r.ok)throw Error(r.status===409?'La sauvegarde a changé. Recharge-la avant de réessayer.':r.status===401?'Jeton invalide ou expiré.':r.status===403?'Accès refusé : vérifie les permissions du jeton.':'Erreur GitHub '+r.status+'. Réessaie plus tard.');return r.json();}
+  try{
+   const meta=await request(base);if(!meta)throw Error('Dépôt introuvable ou inaccessible. Crée le dépôt privé et vérifie le jeton.');
+   if(meta.private!==true)throw Error('Choisis un dépôt privé : les cas ne seront pas envoyés dans un dépôt public.');
+   const branch=meta.default_branch||'main', url=base+'/contents/data.json';
+   const remote=await request(url+'?ref='+encodeURIComponent(branch));
+   if(mode==='load'){
+    if(!remote)throw Error('Aucune sauvegarde data.json dans ce dépôt.');
+    if(remote.encoding!=='base64'||!remote.content)throw Error('Sauvegarde trop volumineuse ou format non pris en charge.');
+    const text=decode(remote.content);validate(JSON.parse(text));download(text);
+    status.textContent='Sauvegarde téléchargée. Utilise « Importer JSON » pour restaurer les cas.';
+   }else{
+    validate(store);const snapshot=JSON.stringify(store,null,2);
+    if(new TextEncoder().encode(snapshot).length>900000)throw Error('Sauvegarde supérieure à 900 Ko : utilise Exporter JSON.');
+    if(remote&&(!remote.sha||remote.type!=='file'))throw Error('data.json existe mais ne correspond pas à un fichier valide.');
+    if(remote&&!confirm('Remplacer data.json dans '+repo+' par les cas présents sur cet appareil ? L’ancienne version restera dans l’historique GitHub.')){status.textContent='Sauvegarde annulée.';return;}
+    const result=await request(url,{method:'PUT',body:JSON.stringify({message:'Sauvegarde Deutsch Trainer',content:encode(snapshot),branch,...(remote?{sha:remote.sha}:{})})});
+    if(!result||!result.content)throw Error('Sauvegarde non confirmée par GitHub.');
+    status.textContent='✅ Cas sauvegardés dans '+repo+'/data.json — '+new Date().toLocaleString('fr-FR');
+   }
+  }catch(e){status.textContent='⚠️ '+(e.message||'Connexion impossible. Réessaie.');}
+  finally{token='';buttons.forEach(b=>b.disabled=false);}
+ }
+ buttons[0].addEventListener('click',()=>run('save'));buttons[1].addEventListener('click',()=>run('load'));
+})();
+</script>
+
 </body>
 </html>
