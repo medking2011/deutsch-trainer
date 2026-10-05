@@ -96,10 +96,31 @@
 <body>
 <header style="position:relative">
  <h1>🇩🇪 Deutsch Trainer — Themen</h1>
- <div class="sub">Apprendre l'allemand par thèmes du quotidien — sauvegarde locale et GitHub privé</div>
+ <div class="sub">Apprendre l'allemand par thèmes du quotidien — cas synchronisés automatiquement entre vos appareils</div>
  <button id="themeBtn" onclick="toggleTheme()" style="position:absolute;right:10px;top:12px;background:var(--card);border:none;border-radius:10px;padding:8px 10px;cursor:pointer;font-size:1rem">🌙</button>
 </header>
 <div id="storageBar"></div>
+<section id="cloudPanel" style="max-width:736px;margin:12px auto;padding:12px;background:var(--card);border-radius:12px">
+<h2>☁️ Mes cas en ligne</h2>
+<p id="cloudStatus" class="hint" role="status" aria-live="polite">Connecte GitHub une fois sur cet appareil pour activer le chargement et l’enregistrement automatiques.</p>
+<details id="cloudSettings">
+<summary style="cursor:pointer;color:var(--accent)">Connexion GitHub</summary>
+<p class="hint">Après connexion, les cas en ligne sont chargés automatiquement. Chaque modification est envoyée après 2 secondes. Les autres appareils se mettent à jour sous 15 secondes, hors saisie en cours. Les audios restent locaux.</p>
+<label for="cloudRepo">Dépôt privé</label><input id="cloudRepo" type="text" value="medking2011/deutsch-trainer-data" autocomplete="off">
+<label for="cloudToken">Jeton GitHub limité à ce dépôt (Contents : lecture et écriture)</label><input id="cloudToken" type="password" autocomplete="off" spellcheck="false" style="width:100%;padding:10px;border-radius:10px;background:var(--card2);color:var(--txt);border:1px solid var(--muted)">
+<label><input id="cloudRemember" type="checkbox" checked> Mémoriser la connexion sur cet appareil personnel</label>
+<p class="hint">Le jeton reste dans ce navigateur et n’est pas inclus dans les sauvegardes. Sur un appareil partagé, décoche cette option. Chaque téléphone ou PC doit être connecté une première fois.</p>
+<button id="cloudConnect" class="bigbtn primary">Activer la synchronisation automatique</button>
+<button id="cloudDisconnect" class="bigbtn ghost" hidden>Déconnecter cet appareil</button>
+</details>
+<div id="cloudConflict" hidden>
+<p class="hint">Les modifications locales sont préservées. Une copie de secours est conservée avant tout remplacement.</p>
+<button id="cloudUseRemote" class="bigbtn primary">Utiliser les cas en ligne</button>
+<button id="cloudUseLocal" class="bigbtn ghost">Conserver les cas de cet appareil en ligne</button>
+</div>
+<button id="cloudBackup" class="bigbtn ghost" hidden>Télécharger la copie de secours locale</button>
+<button id="cloudRemoteBackup" class="bigbtn ghost" hidden>Télécharger la copie de secours distante</button>
+</section>
 <nav id="nav"></nav>
 <main id="app"></main>
 <div class="footerTools">
@@ -1332,59 +1353,213 @@ function importData(inp){
 }
 
 /* ================= INIT ================= */
-boot();
+window.dtBootReady=boot();
 </script>
 
-<details style="max-width:736px;margin:12px auto;padding:12px;background:var(--card);border-radius:12px">
-<summary style="cursor:pointer;color:var(--accent);font-weight:700">☁️ Sauvegarde GitHub privée</summary>
-<p class="hint">Sauvegarde manuelle des thèmes, cas, notes, marquages et réglages dans data.json. Les fichiers audio restent sur cet appareil.</p>
-<p class="hint">Crée un dépôt privé pour tes données, puis un jeton GitHub à accès fin limité à ce dépôt avec « Contents: Read and write ». Le jeton est effacé après chaque opération et n’est jamais mémorisé.</p>
-<label for="ghRepo">Dépôt privé (propriétaire/nom)</label><input id="ghRepo" type="text" value="medking2011/deutsch-trainer-data" autocomplete="off">
-<label for="ghToken">Jeton GitHub</label><input id="ghToken" type="password" autocomplete="off" spellcheck="false" style="width:100%;padding:10px;border-radius:10px;background:var(--card2);color:var(--txt);border:1px solid var(--muted)">
-<button id="ghSave" class="bigbtn primary" type="button">☁️ Sauvegarder les cas sur GitHub</button>
-<button id="ghLoad" class="bigbtn ghost" type="button">📥 Télécharger ma sauvegarde GitHub</button>
-<p class="hint">Pour restaurer : télécharge la sauvegarde, puis utilise « Importer JSON ». Exporte d’abord tes données actuelles si tu souhaites les conserver.</p>
-<p id="ghStatus" class="hint" role="status" aria-live="polite"></p>
-</details>
+
+
 <script>
-(()=>{
- const repoInput=document.getElementById('ghRepo'), tokenInput=document.getElementById('ghToken');
- const status=document.getElementById('ghStatus'), buttons=[document.getElementById('ghSave'),document.getElementById('ghLoad')];
- const encode=s=>{let b='';for(const n of new TextEncoder().encode(s))b+=String.fromCharCode(n);return btoa(b);};
- const decode=s=>new TextDecoder('utf-8',{fatal:true}).decode(Uint8Array.from(atob(s.replace(/\s/g,'')),c=>c.charCodeAt(0)));
- function validate(d){if(!d||!Array.isArray(d.themes)||d.v!==3||!d.themes.every(t=>t&&typeof t.id==='string'&&typeof t.name==='string'&&Array.isArray(t.subjects)&&t.subjects.every(s=>s&&typeof s.id==='string'&&typeof s.titel==='string'&&typeof s.content==='string')))throw Error('Format de sauvegarde incompatible. Aucun fichier modifié.');}
- function download(text){const url=URL.createObjectURL(new Blob([text],{type:'application/json'}));const a=document.createElement('a');a.href=url;a.download='deutsch_trainer_github_'+new Date().toISOString().slice(0,10)+'.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}
- async function run(mode){
-  const repo=repoInput.value.trim();let token=tokenInput.value.trim();tokenInput.value='';
-  if(!/^[A-Za-z0-9-]+\/[A-Za-z0-9_.-]+$/.test(repo)||!token){status.textContent='Renseigne le dépôt privé et le jeton GitHub.';return;}
-  buttons.forEach(b=>b.disabled=true);status.textContent='Connexion à GitHub…';
-  const base='https://api.github.com/repos/'+repo.split('/').map(encodeURIComponent).join('/');
-  async function request(url,options={}){const r=await fetch(url,{...options,cache:'no-store',redirect:'error',headers:{Accept:'application/vnd.github+json',Authorization:'Bearer '+token,...(options.body?{'Content-Type':'application/json'}:{})},signal:AbortSignal.timeout(30000)});if(r.status===404)return null;if(!r.ok)throw Error(r.status===409?'La sauvegarde a changé. Recharge-la avant de réessayer.':r.status===401?'Jeton invalide ou expiré.':r.status===403?'Accès refusé : vérifie les permissions du jeton.':'Erreur GitHub '+r.status+'. Réessaie plus tard.');return r.json();}
-  try{
-   const meta=await request(base);if(!meta)throw Error('Dépôt introuvable ou inaccessible. Crée le dépôt privé et vérifie le jeton.');
-   if(meta.private!==true)throw Error('Choisis un dépôt privé : les cas ne seront pas envoyés dans un dépôt public.');
-   const branch=meta.default_branch||'main', url=base+'/contents/data.json';
-   const remote=await request(url+'?ref='+encodeURIComponent(branch));
-   if(mode==='load'){
-    if(!remote)throw Error('Aucune sauvegarde data.json dans ce dépôt.');
-    if(remote.encoding!=='base64'||!remote.content)throw Error('Sauvegarde trop volumineuse ou format non pris en charge.');
-    const text=decode(remote.content);validate(JSON.parse(text));download(text);
-    status.textContent='Sauvegarde téléchargée. Utilise « Importer JSON » pour restaurer les cas.';
-   }else{
-    validate(store);const snapshot=JSON.stringify(store,null,2);
-    if(new TextEncoder().encode(snapshot).length>900000)throw Error('Sauvegarde supérieure à 900 Ko : utilise Exporter JSON.');
-    if(remote&&(!remote.sha||remote.type!=='file'))throw Error('data.json existe mais ne correspond pas à un fichier valide.');
-    if(remote&&!confirm('Remplacer data.json dans '+repo+' par les cas présents sur cet appareil ? L’ancienne version restera dans l’historique GitHub.')){status.textContent='Sauvegarde annulée.';return;}
-    const result=await request(url,{method:'PUT',body:JSON.stringify({message:'Sauvegarde Deutsch Trainer',content:encode(snapshot),branch,...(remote?{sha:remote.sha}:{})})});
-    if(!result||!result.content)throw Error('Sauvegarde non confirmée par GitHub.');
-    status.textContent='✅ Cas sauvegardés dans '+repo+'/data.json — '+new Date().toLocaleString('fr-FR');
-   }
-  }catch(e){status.textContent='⚠️ '+(e.message||'Connexion impossible. Réessaie.');}
-  finally{token='';buttons.forEach(b=>b.disabled=false);}
- }
- buttons[0].addEventListener('click',()=>run('save'));buttons[1].addEventListener('click',()=>run('load'));
-})();
-</script>
+/* GitHub JSON synchronization; transport and UI are injected for testing. */
+class TrainerCloudSync {
+  constructor(io) {
+    this.io=io; this.connected=false; this.busy=false; this.conflict=false;
+    this.sha=null; this.dirty=false; this.version=0; this.timer=null;
+  }
+  markChanged() {
+    this.version++; this.dirty=true;
+    this.persist();
+    if(this.connected&&!this.conflict) {
+      this.io.status('⏳ Modifications enregistrées sur cet appareil — envoi automatique…');
+      clearTimeout(this.timer);
+      this.timer=setTimeout(()=>this.tick(),2000);
+    }
+  }
+  persist(){this.io.meta({sha:this.sha,dirty:this.dirty});}
+  stop(){clearTimeout(this.timer);this.connected=false;this.io.status('Synchronisation déconnectée. Les modifications restent sur cet appareil.');}
+  setConflict(){this.conflict=true;this.persist();this.io.status('⚠️ Deux appareils ont modifié les cas. Choisis la version à conserver ci-dessous.',true);}
+  async start(previous) {
+    this.busy=true;
+    const initial=this.io.read(), revision=this.version;
+    try {
+      const remote=await this.io.get();
+      this.sha=previous?.sha||null;
+      this.dirty=!!previous?.dirty||revision!==this.version;
+      this.connected=true;
+      if(this.dirty) {
+        if((remote?.sha||null)!==this.sha){this.setConflict();return;}
+      }else if(remote) {
+        if(initial!==remote.text)this.io.backup(initial);
+        await this.io.apply(remote.text);
+        this.sha=remote.sha;
+      }else{this.dirty=true;}
+      this.persist();
+      this.io.status(this.dirty?'⏳ Première sauvegarde en ligne…':'☁️ Cas en ligne chargés — synchronisation automatique active');
+    }catch(e){this.connected=false;this.io.status('⚠️ '+e.message);}
+    finally{this.busy=false;}
+    if(this.connected&&this.dirty&&!this.conflict)await this.tick();
+  }
+  async tick() {
+    if(!this.connected||this.busy||this.conflict)return;
+    this.busy=true;
+    try {
+      if(!this.io.online()){this.io.status('📴 Hors ligne — modifications conservées ici, envoi au retour du réseau.');return;}
+      const remote=await this.io.get();
+      if(this.dirty) {
+        if((remote?.sha||null)!==this.sha){this.setConflict();return;}
+        const snapshot=this.io.read(), revision=this.version;
+        this.io.status('☁️ Enregistrement en ligne…');
+        const result=await this.io.put(snapshot,this.sha);
+        this.sha=result.sha;
+        this.dirty=this.version!==revision;
+        this.persist();
+        this.io.status(this.dirty?'⏳ Modifications suivantes en attente…':'✅ Enregistré en ligne · '+new Date().toLocaleTimeString('fr-FR'));
+      }else if((remote?.sha||null)!==this.sha) {
+        if(!remote){this.setConflict();return;}
+        if(this.io.editing()){this.io.status('📥 Une mise à jour est disponible ; chargement à la fin de la saisie.');return;}
+        this.io.backup(this.io.read());
+        await this.io.apply(remote.text);
+        this.sha=remote.sha;this.persist();
+        this.io.status('✅ Cas actualisés depuis un autre appareil');
+      }
+    }catch(e){
+      if(e.code===409||e.code===422)this.setConflict();
+      else this.io.status('⚠️ '+e.message+' — données conservées sur cet appareil ; nouvelle tentative automatique.');
+    }finally {
+      this.busy=false;
+      if(this.connected&&this.dirty&&!this.conflict){clearTimeout(this.timer);this.timer=setTimeout(()=>this.tick(),10000);}
+    }
+  }
+  async resolve(choice) {
+    if(this.busy||!this.connected)return;
+    this.busy=true;
+    try {
+      const remote=await this.io.get();
+      this.io.backup(this.io.read());
+      if(choice==='remote') {
+        if(!remote)throw Error('Aucune version en ligne à charger.');
+        await this.io.apply(remote.text);this.dirty=false;
+      }else {
+        if(remote)this.io.backup(remote.text,'remote');
+        this.dirty=true;
+      }
+      this.sha=remote?.sha||null;this.conflict=false;this.persist();
+      this.io.status(choice==='remote'?'✅ Version en ligne chargée':'⏳ Publication de la version de cet appareil…');
+    }catch(e){this.io.status('⚠️ '+e.message,true);}
+    finally{this.busy=false;}
+    if(!this.conflict&&this.dirty)await this.tick();
+  }
+}
+if(typeof module!=='undefined')module.exports=TrainerCloudSync;
 
+(async()=>{
+  await window.dtBootReady;
+  const $=id=>document.getElementById(id);
+  const AUTH='dt_cloud_auth_v1', META='dt_cloud_meta_v1', BACKUP='dt_cloud_backup_v1';
+  let controller=null, credentials=null, branch='main', generation=0;
+  let lastLocal=JSON.stringify(store);
+  const readSaved=key=>{try{return JSON.parse(localStorage.getItem(key));}catch{return null;}};
+  function status(text,conflict=false){$('cloudStatus').textContent=text;$('cloudConflict').hidden=!conflict;}
+  function validate(d){if(!d||d.v!==3||!Array.isArray(d.themes)||!d.themes.every(t=>t&&typeof t.id==='string'&&typeof t.name==='string'&&Array.isArray(t.subjects)&&t.subjects.every(s=>s&&typeof s.id==='string'&&typeof s.titel==='string'&&typeof s.content==='string')))throw Error('Format des cas en ligne incompatible.');return d;}
+  const encode=s=>{let out='';for(const b of new TextEncoder().encode(s))out+=String.fromCharCode(b);return btoa(out);};
+  const decode=s=>new TextDecoder('utf-8',{fatal:true}).decode(Uint8Array.from(atob(s.replace(/\s/g,'')),c=>c.charCodeAt(0)));
+  function backup(text,side='local'){
+    localStorage.setItem(BACKUP+'_'+side,text);
+    $(side==='local'?'cloudBackup':'cloudRemoteBackup').hidden=false;
+  }
+  function downloadBackup(side){const text=localStorage.getItem(BACKUP+'_'+side);if(!text)return;const u=URL.createObjectURL(new Blob([text],{type:'application/json'}));const a=document.createElement('a');a.href=u;a.download='deutsch-trainer-secours-'+side+'.json';a.click();setTimeout(()=>URL.revokeObjectURL(u),1000);}
+  const originalSave=save;
+  save=async function(){
+    const before=lastLocal;
+    await originalSave();
+    lastLocal=JSON.stringify(store);
+    if(lastLocal===before)return;
+    if(controller)controller.markChanged();
+    else{const m=readSaved(META);if(m){m.dirty=true;localStorage.setItem(META,JSON.stringify(m));status('📴 Modifications locales en attente de connexion GitHub.');}}
+  };
+  async function connect(saved=null){
+    if(controller?.busy)return;
+    if(controller)controller.stop();
+    const repo=(saved?.repo||$('cloudRepo').value).trim(), token=(saved?.token||$('cloudToken').value).trim();
+    $('cloudToken').value='';
+    if(!/^[A-Za-z0-9-]+\/[A-Za-z0-9_.-]+$/.test(repo)||!token){status('Renseigne le dépôt privé et le jeton pour la première connexion.');$('cloudSettings').open=true;return;}
+    const epoch=++generation;
+    credentials={repo,token};
+    const base='https://api.github.com/repos/'+repo.split('/').map(encodeURIComponent).join('/');
+    async function request(url,options={}){
+      if(epoch!==generation)throw Error('Connexion fermée.');
+      const r=await fetch(url,{...options,cache:'no-store',redirect:'error',headers:{Accept:'application/vnd.github+json',Authorization:'Bearer '+token,...(options.body?{'Content-Type':'application/json'}:{})},signal:AbortSignal.timeout(20000)});
+      if(epoch!==generation)throw Error('Connexion fermée.');
+      if(r.status===404)return null;
+      if(!r.ok){const e=Error(r.status===401?'Jeton expiré ou invalide : reconnecte GitHub':r.status===403?'Accès refusé ou limite GitHub atteinte':'Erreur GitHub '+r.status);e.code=r.status;throw e;}
+      return r.json();
+    }
+    $('cloudConnect').disabled=true;status('Connexion au dépôt privé…');
+    try {
+      const metadata=await request(base);
+      if(!metadata)throw Error('Dépôt inaccessible. Vérifie son nom et les permissions du jeton.');
+      if(metadata.private!==true)throw Error('Un dépôt privé est obligatoire pour les cas.');
+      branch=metadata.default_branch||'main';
+      const previous=readSaved(META), relevant=previous?.repo===repo?previous:null;
+      controller=new TrainerCloudSync({
+        read:()=>JSON.stringify(store),
+        apply:text=>{
+          const data=validate(JSON.parse(text));
+          localStorage.setItem(LS_KEY,JSON.stringify(data));
+          store=data;ensureSettings();lastLocal=JSON.stringify(store);
+          if(!store.themes.some(t=>t.id===view.themeId)){view.themeId=store.themes[0]?.id||null;view.page='list';view.subjectId=null;}
+          if(view.subjectId&&!currentTheme()?.subjects.some(s=>s.id===view.subjectId)){view.page='list';view.subjectId=null;}
+          applyTheme();render();renderStorageBar();
+        },
+        meta:m=>localStorage.setItem(META,JSON.stringify({repo,...m})),
+        backup,status,
+        online:()=>navigator.onLine,
+        editing:()=>view.page==='edit'||view.page==='themeForm'||/^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement?.tagName||''),
+        get:async()=>{
+          const remote=await request(base+'/contents/data.json?ref='+encodeURIComponent(branch));
+          if(!remote)return null;
+          if(remote.type!=='file'||remote.encoding!=='base64'||!remote.content)throw Error('data.json invalide ou trop volumineux (maximum 900 Ko).');
+          const text=decode(remote.content);validate(JSON.parse(text));return {sha:remote.sha,text};
+        },
+        put:async(text,sha)=>{
+          validate(JSON.parse(text));
+          if(new TextEncoder().encode(text).length>900000)throw Error('Cas supérieurs à 900 Ko : exporte un JSON de secours');
+          const result=await request(base+'/contents/data.json',{method:'PUT',body:JSON.stringify({message:'Synchronisation automatique Deutsch Trainer',content:encode(text),branch,...(sha?{sha}:{})})});
+          if(!result?.content?.sha)throw Error('Enregistrement non confirmé');
+          return {sha:result.content.sha};
+        }
+      });
+      controller.sha=relevant?.sha||null;
+      controller.dirty=!!relevant?.dirty;
+      // Avoid a competing folder copy overwriting the cloud version.
+      dirHandle=null;window._pendingHandle=null;renderStorageBar();
+      if(saved||$('cloudRemember').checked)localStorage.setItem(AUTH,JSON.stringify(credentials));
+      else localStorage.removeItem(AUTH);
+      $('cloudRepo').value=repo;$('cloudDisconnect').hidden=false;$('cloudSettings').open=false;
+      await controller.start(relevant);
+    }catch(e){status('⚠️ '+e.message);$('cloudSettings').open=true;}
+    finally{$('cloudConnect').disabled=false;}
+  }
+  $('cloudConnect').onclick=()=>connect();
+  $('cloudDisconnect').onclick=()=>{
+    if(controller?.busy){status('Opération en cours ; attends sa fin avant de déconnecter.');return;}
+    controller?.stop();generation++;credentials=null;controller=null;
+    localStorage.removeItem(AUTH);$('cloudToken').value='';$('cloudDisconnect').hidden=true;$('cloudSettings').open=true;
+    status('Déconnecté. La connexion mémorisée a été supprimée de cet appareil.');
+  };
+  $('cloudUseRemote').onclick=()=>controller?.resolve('remote');
+  $('cloudUseLocal').onclick=()=>{if(confirm('Publier les cas de cet appareil à la place de la version en ligne ? Une copie de secours de chaque version sera conservée.'))controller?.resolve('local');};
+  $('cloudBackup').onclick=()=>downloadBackup('local');$('cloudRemoteBackup').onclick=()=>downloadBackup('remote');
+  $('cloudBackup').hidden=!localStorage.getItem(BACKUP+'_local');$('cloudRemoteBackup').hidden=!localStorage.getItem(BACKUP+'_remote');
+  function resume(){if(!navigator.onLine)return;if(credentials&&!controller?.connected&&!$('cloudConnect').disabled)connect(credentials);else controller?.tick();}
+  setInterval(()=>{if(document.visibilityState==='visible')resume();},15000);
+  window.addEventListener('online',resume);
+  document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')resume();});
+  window.addEventListener('beforeunload',e=>{if(controller?.dirty){e.preventDefault();e.returnValue='';}});
+  const auth=readSaved(AUTH);
+  if(auth?.repo&&auth?.token){$('cloudRepo').value=auth.repo;await connect(auth);}
+  else $('cloudSettings').open=true;
+})();
+
+</script>
 </body>
 </html>
