@@ -100,6 +100,16 @@
  <button id="themeBtn" onclick="toggleTheme()" style="position:absolute;right:10px;top:12px;background:var(--card);border:none;border-radius:10px;padding:8px 10px;cursor:pointer;font-size:1rem">🌙</button>
 </header>
 <div id="storageBar"></div>
+<!-- Maintien de l'écran : préférence locale, indépendante des cas et de la synchronisation. -->
+<div id="screenAwakePanel" style="max-width:736px;margin:10px auto;padding:0 12px">
+ <label style="display:flex;align-items:center;gap:8px;cursor:pointer;color:var(--txt)">
+  <input id="screenAwakeOption" type="checkbox" aria-describedby="screenAwakeHint screenAwakeStatus">
+  ☀️ Garder l'écran allumé pendant la lecture
+ </label>
+ <p id="screenAwakeHint" class="hint">Laisse cette page affichée. Le verrouillage manuel reste possible.</p>
+ <p id="screenAwakeStatus" class="hint" role="status" aria-live="polite"></p>
+</div>
+
 <section id="cloudPanel" style="max-width:736px;margin:12px auto;padding:12px;background:var(--card);border-radius:12px">
 <h2>☁️ Mes cas en ligne</h2>
 <p id="cloudStatus" class="hint" role="status" aria-live="polite">Connecte GitHub une fois sur cet appareil pour activer le chargement et l’enregistrement automatiques.</p>
@@ -1560,6 +1570,73 @@ if(typeof module!=='undefined')module.exports=TrainerCloudSync;
   else $('cloudSettings').open=true;
 })();
 
+</script>
+
+<script>
+/* Option isolée : ne modifie ni les données ni le moteur de lecture. */
+(() => {
+ const option = document.getElementById('screenAwakeOption');
+ const status = document.getElementById('screenAwakeStatus');
+ const supported = 'wakeLock' in navigator && window.isSecureContext;
+ const key = 'deutschTrainer.screenAwake';
+ let lock = null, pending = false, failed = false, suspended = false;
+ let timer = null, wasReading = false;
+ function reading() { return _speaking || auto.playing; }
+ function wanted() { return option.checked && !suspended && document.visibilityState === 'visible' && reading(); }
+ function paint() {
+  status.textContent = !supported ? 'Cette option nécessite un navigateur compatible et une connexion HTTPS.'
+   : !option.checked ? 'Option désactivée.'
+   : lock && !lock.released ? '☀️ Écran maintenu allumé pendant la lecture.'
+   : failed ? 'Maintien indisponible (batterie ou restriction du téléphone). Décoche puis recoche pour réessayer.'
+   : wanted() ? 'Activation du maintien de l’écran…' : 'Prêt : l’écran sera maintenu allumé pendant la lecture.';
+ }
+ async function sync() {
+  const isReading = reading();
+  if (isReading && !wasReading) failed = false;
+  wasReading = isReading;
+  if (!wanted()) {
+   const previous = lock; lock = null;
+   if (previous && !previous.released) { try { await previous.release(); } catch (_) {} }
+   paint(); return;
+  }
+  if (!supported || pending || failed || (lock && !lock.released)) { paint(); return; }
+  pending = true;
+  try {
+   const acquired = await navigator.wakeLock.request('screen');
+   if (!wanted()) { await acquired.release(); }
+   else {
+    lock = acquired;
+    acquired.addEventListener('release', () => {
+     if (lock === acquired) {
+      lock = null;
+      if (wanted()) failed = true;
+      paint();
+     }
+    });
+   }
+  } catch (_) { if (wanted()) failed = true; }
+  finally { pending = false; paint(); }
+ }
+ function start() {
+  clearInterval(timer); timer = null;
+  if (supported && option.checked && !suspended) timer = setInterval(sync, 500);
+  sync();
+ }
+ option.disabled = !supported;
+ try { option.checked = supported && localStorage.getItem(key) === '1'; } catch (_) {}
+ option.addEventListener('change', () => {
+  failed = false;
+  try { localStorage.setItem(key, option.checked ? '1' : '0'); } catch (_) {}
+  start();
+ });
+ document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') failed = false;
+  sync();
+ });
+ window.addEventListener('pagehide', () => { suspended = true; start(); });
+ window.addEventListener('pageshow', () => { suspended = false; failed = false; start(); });
+ start();
+})();
 </script>
 </body>
 </html>
